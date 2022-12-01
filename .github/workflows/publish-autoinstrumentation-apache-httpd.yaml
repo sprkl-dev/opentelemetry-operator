@@ -1,16 +1,6 @@
 name: "Publish Apache HTTPD Auto-Instrumentation"
 
 on:
-  push:
-    paths:
-      - 'autoinstrumentation/apache-httpd/**'
-      - '.github/workflows/publish-autoinstrumentation-apache-httpd.yaml'
-    branches:
-      - main
-  pull_request:
-    paths:
-      - 'autoinstrumentation/apache-httpd/**'
-      - '.github/workflows/publish-autoinstrumentation-apache-httpd.yaml'
   workflow_dispatch:
 
 jobs:

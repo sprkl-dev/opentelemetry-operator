@@ -1,16 +1,6 @@
 name: "Publish Python Auto-Instrumentation"
 
 on:
-  push:
-    paths:
-      - 'autoinstrumentation/python/**'
-      - '.github/workflows/publish-autoinstrumentation-python.yaml'
-    branches:
-      - main
-  pull_request:
-    paths:
-      - 'autoinstrumentation/python/**'
-      - '.github/workflows/publish-autoinstrumentation-python.yaml'
   workflow_dispatch:
 
 jobs:
