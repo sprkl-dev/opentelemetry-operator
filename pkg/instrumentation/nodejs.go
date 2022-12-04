@@ -15,14 +15,27 @@
 package instrumentation
 
 import (
+	"fmt"
+	"path"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
 )
 
 const (
-	envNodeOptions      = "NODE_OPTIONS"
-	nodeRequireArgument = " --require /otel-auto-instrumentation/autoinstrumentation.js"
+	envSprklPrefix = "SPRKL_PREFIX"
+	envNodePath    = "NODE_PATH"
+	envNodeOptions = "NODE_OPTIONS"
+
+	nodeRequireArgument = "-r @sprkl/obs"
+	sprklPrefix         = "/.sprkl"
+)
+
+var (
+	sprklNodePath         = path.Join(sprklPrefix, "lib", "node_modules")
+	nodeVolumeName        = fmt.Sprintf("%s-nodejs", volumeName)
+	nodeInitContainerName = fmt.Sprintf("%s-nodejs", initContainerName)
 )
 
 func injectNodeJSSDK(nodeJSSpec v1alpha1.NodeJS, pod corev1.Pod, index int) (corev1.Pod, error) {
@@ -41,7 +54,7 @@ func injectNodeJSSDK(nodeJSSpec v1alpha1.NodeJS, pod corev1.Pod, index int) (cor
 			container.Env = append(container.Env, env)
 		}
 	}
-
+	// @eliran TODO: export appending
 	idx := getIndexOfEnv(container.Env, envNodeOptions)
 	if idx == -1 {
 		container.Env = append(container.Env, corev1.EnvVar{
@@ -49,29 +62,44 @@ func injectNodeJSSDK(nodeJSSpec v1alpha1.NodeJS, pod corev1.Pod, index int) (cor
 			Value: nodeRequireArgument,
 		})
 	} else if idx > -1 {
-		container.Env[idx].Value = container.Env[idx].Value + nodeRequireArgument
+		container.Env[idx].Value = fmt.Sprintf("%s %s", container.Env[idx].Value, nodeRequireArgument)
 	}
 
+	idx = getIndexOfEnv(container.Env, envNodePath)
+	if idx == -1 {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name:  envNodePath,
+			Value: sprklNodePath,
+		})
+	} else if idx > -1 {
+		container.Env[idx].Value = fmt.Sprintf("%s:%s", container.Env[idx].Value, sprklNodePath)
+	}
+
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  envSprklPrefix,
+		Value: sprklPrefix,
+	})
+
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      volumeName,
-		MountPath: "/otel-auto-instrumentation",
+		Name:      nodeVolumeName,
+		MountPath: sprklPrefix,
 	})
 
 	// We just inject Volumes and init containers for the first processed container
-	if isInitContainerMissing(pod) {
+	if isInitContainerMissing(pod, nodeInitContainerName) {
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: volumeName,
+			Name: nodeVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			}})
 
 		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
-			Name:    initContainerName,
+			Name:    nodeInitContainerName,
 			Image:   nodeJSSpec.Image,
-			Command: []string{"cp", "-a", "/autoinstrumentation/.", "/otel-auto-instrumentation/"},
+			Command: []string{"cp", "-a", "/root/.sprkl/.", sprklPrefix},
 			VolumeMounts: []corev1.VolumeMount{{
-				Name:      volumeName,
-				MountPath: "/otel-auto-instrumentation",
+				Name:      nodeVolumeName,
+				MountPath: sprklPrefix,
 			}},
 		})
 	}

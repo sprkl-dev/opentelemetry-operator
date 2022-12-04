@@ -26,8 +26,13 @@ const (
 	envPythonPath          = "PYTHONPATH"
 	envOtelTracesExporter  = "OTEL_TRACES_EXPORTER"
 	envOtelMetricsExporter = "OTEL_METRICS_EXPORTER"
-	pythonPathPrefix       = "/otel-auto-instrumentation/opentelemetry/instrumentation/auto_instrumentation"
-	pythonPathSuffix       = "/otel-auto-instrumentation"
+	pythonPathPrefix       = "/otel-auto-instrumentation-python/opentelemetry/instrumentation/auto_instrumentation"
+	pythonPathSuffix       = "/otel-auto-instrumentation-python"
+)
+
+var (
+	pythonVolumeName        = fmt.Sprintf("%s-python", volumeName)
+	pythonInitContainerName = fmt.Sprintf("%s-python", initContainerName)
 )
 
 func injectPythonSDK(pythonSpec v1alpha1.Python, pod corev1.Pod, index int) (corev1.Pod, error) {
@@ -79,25 +84,25 @@ func injectPythonSDK(pythonSpec v1alpha1.Python, pod corev1.Pod, index int) (cor
 	}
 
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      volumeName,
-		MountPath: "/otel-auto-instrumentation",
+		Name:      pythonVolumeName,
+		MountPath: "/otel-auto-instrumentation-python",
 	})
 
 	// We just inject Volumes and init containers for the first processed container.
-	if isInitContainerMissing(pod) {
+	if isInitContainerMissing(pod, pythonInitContainerName) {
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: volumeName,
+			Name: pythonVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			}})
 
 		pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
-			Name:    initContainerName,
+			Name:    pythonInitContainerName,
 			Image:   pythonSpec.Image,
-			Command: []string{"cp", "-a", "/autoinstrumentation/.", "/otel-auto-instrumentation/"},
+			Command: []string{"cp", "-a", "/autoinstrumentation/.", "/otel-auto-instrumentation-python/"},
 			VolumeMounts: []corev1.VolumeMount{{
-				Name:      volumeName,
-				MountPath: "/otel-auto-instrumentation",
+				Name:      pythonVolumeName,
+				MountPath: "/otel-auto-instrumentation-python",
 			}},
 		})
 	}

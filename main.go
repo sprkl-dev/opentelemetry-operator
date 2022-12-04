@@ -221,7 +221,8 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "OpenTelemetryCollector")
 			os.Exit(1)
 		}
-		if err = (&otelv1alpha1.Instrumentation{
+
+		defaultInst := &otelv1alpha1.Instrumentation{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
 					otelv1alpha1.AnnotationDefaultAutoInstrumentationJava:   autoInstrumentationJava,
@@ -230,7 +231,9 @@ func main() {
 					otelv1alpha1.AnnotationDefaultAutoInstrumentationDotNet: autoInstrumentationDotNet,
 				},
 			},
-		}).SetupWebhookWithManager(mgr); err != nil {
+		}
+
+		if err = defaultInst.SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Instrumentation")
 			os.Exit(1)
 		}
@@ -239,7 +242,7 @@ func main() {
 			Handler: webhookhandler.NewWebhookHandler(cfg, ctrl.Log.WithName("pod-webhook"), mgr.GetClient(),
 				[]webhookhandler.PodMutator{
 					sidecar.NewMutator(logger, cfg, mgr.GetClient()),
-					instrumentation.NewMutator(logger, mgr.GetClient()),
+					instrumentation.NewMutator(logger, mgr.GetClient(), defaultInst),
 				}),
 		})
 	}

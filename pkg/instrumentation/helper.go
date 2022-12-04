@@ -14,12 +14,16 @@
 
 package instrumentation
 
-import corev1 "k8s.io/api/core/v1"
+import (
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 // Calculate if we already inject InitContainers.
-func isInitContainerMissing(pod corev1.Pod) bool {
+func isInitContainerMissing(pod corev1.Pod, instInitContainerName string) bool {
 	for _, initContainer := range pod.Spec.InitContainers {
-		if initContainer.Name == initContainerName {
+		if initContainer.Name == instInitContainerName {
 			return false
 		}
 	}
@@ -27,11 +31,19 @@ func isInitContainerMissing(pod corev1.Pod) bool {
 }
 
 // Checks if Pod is already instrumented by checking Instrumentation InitContainer presence.
-func isAutoInstrumentationInjected(pod corev1.Pod) bool {
+func isAutoInstrumentationInjected(pod corev1.Pod, availableInstContainers []string) bool {
+	exists := make(map[string]bool)
 	for _, cont := range pod.Spec.InitContainers {
-		if cont.Name == initContainerName {
-			return true
+		if strings.HasPrefix(cont.Name, initContainerName) {
+			exists[cont.Name] = true
 		}
 	}
-	return false
+
+	for _, instContainer := range availableInstContainers {
+		if _, ok := exists[instContainer]; !ok {
+			return false
+		}
+	}
+
+	return true
 }

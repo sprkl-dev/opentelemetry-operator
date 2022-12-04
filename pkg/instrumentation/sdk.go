@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
+	"github.com/open-telemetry/opentelemetry-operator/internal/config"
 	"github.com/open-telemetry/opentelemetry-operator/pkg/constants"
 )
 
@@ -129,6 +130,22 @@ func (i *sdkInjector) injectCommonEnvVar(otelinst v1alpha1.Instrumentation, pod 
 			container.Env = append(container.Env, env)
 		}
 	}
+
+	/* ---------------------------- */
+	// Inject sprkl env vars into pods (has SPRKL_ prefix to avoid override clients env vars)
+	/* ---------------------------- */
+	envVarsToInject := config.GetSprklConfig().SprklInjectToPods
+	for name, value := range envVarsToInject {
+		if idx := getIndexOfEnv(container.Env, name); idx != -1 {
+			container.Env[idx].Value = value
+		} else {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  name,
+				Value: value,
+			})
+		}
+	}
+
 	return pod
 }
 

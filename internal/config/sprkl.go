@@ -54,8 +54,8 @@ func getSprklNodeImage() string {
 func getSprklPodExclude() *regexp.Regexp {
 	val := os.Getenv(env_SPRKL_POD_EXCLUDE)
 	regex, err := regexp.Compile(val)
-	if err != nil {
-		return regexp.MustCompile("")
+	if err != nil || len(val) == 0 {
+		return regexp.MustCompile("(^$)")
 	}
 
 	return regex
@@ -63,12 +63,8 @@ func getSprklPodExclude() *regexp.Regexp {
 
 func getSprklPodInclude() *regexp.Regexp {
 	val := os.Getenv(env_SPRKL_POD_INCLUDE)
-	if len(val) == 0 {
-		val = "(.+)"
-	}
-
 	regex, err := regexp.Compile(val)
-	if err != nil {
+	if err != nil || len(val) == 0 {
 		return regexp.MustCompile("(.+)")
 	}
 
@@ -78,8 +74,8 @@ func getSprklPodInclude() *regexp.Regexp {
 func getSprklNsExclude() *regexp.Regexp {
 	val := os.Getenv(env_SPRKL_NS_EXCLUDE)
 	regex, err := regexp.Compile(val)
-	if err != nil {
-		return regexp.MustCompile("")
+	if err != nil || len(val) == 0 {
+		return regexp.MustCompile("(^$)")
 	}
 
 	return regex
@@ -87,12 +83,8 @@ func getSprklNsExclude() *regexp.Regexp {
 
 func getSprklNsInclude() *regexp.Regexp {
 	val := os.Getenv(env_SPRKL_NS_INCLUDE)
-	if len(val) == 0 {
-		val = "(.+)"
-	}
-
 	regex, err := regexp.Compile(val)
-	if err != nil {
+	if err != nil || len(val) == 0 {
 		return regexp.MustCompile("(.+)")
 	}
 
