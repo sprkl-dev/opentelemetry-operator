@@ -49,6 +49,7 @@ type Config struct {
 	platform                       platform.Platform
 	autoDetectFrequency            time.Duration
 	autoscalingVersion             autodetect.AutoscalingVersion
+	sprklConfig                    SprklConfig
 }
 
 // New constructs a new configuration based on the given options.
