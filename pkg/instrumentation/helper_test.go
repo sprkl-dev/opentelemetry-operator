@@ -67,7 +67,7 @@ func TestInitContainerMissing(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := isInitContainerMissing(test.pod)
+			result := isInitContainerMissing(test.pod, initContainerName)
 			assert.Equal(t, test.expected, result)
 		})
 	}
@@ -119,7 +119,7 @@ func TestAutoInstrumentationInjected(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := isAutoInstrumentationInjected(test.pod)
+			result := isAutoInstrumentationInjected(test.pod, []string{initContainerName})
 			assert.Equal(t, test.expected, result)
 		})
 	}

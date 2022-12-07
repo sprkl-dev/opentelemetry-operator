@@ -17,6 +17,7 @@ package instrumentation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -25,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
+	"github.com/open-telemetry/opentelemetry-operator/internal/config"
 	"github.com/open-telemetry/opentelemetry-operator/internal/webhookhandler"
 )
 
@@ -37,6 +39,7 @@ type instPodMutator struct {
 	Client      client.Client
 	sdkInjector *sdkInjector
 	Logger      logr.Logger
+	defaultInst *v1alpha1.Instrumentation
 }
 
 type languageInstrumentations struct {
@@ -49,7 +52,10 @@ type languageInstrumentations struct {
 
 var _ webhookhandler.PodMutator = (*instPodMutator)(nil)
 
-func NewMutator(logger logr.Logger, client client.Client) *instPodMutator {
+func NewMutator(logger logr.Logger, client client.Client, defaultInst *v1alpha1.Instrumentation) *instPodMutator {
+	// INFO: initialization default values
+	defaultInst.Default()
+
 	return &instPodMutator{
 		Logger: logger,
 		Client: client,
@@ -57,6 +63,7 @@ func NewMutator(logger logr.Logger, client client.Client) *instPodMutator {
 			logger: logger,
 			client: client,
 		},
+		defaultInst: defaultInst,
 	}
 }
 
@@ -64,7 +71,7 @@ func (pm *instPodMutator) Mutate(ctx context.Context, ns corev1.Namespace, pod c
 	logger := pm.Logger.WithValues("namespace", pod.Namespace, "name", pod.Name)
 
 	// We check if Pod is already instrumented.
-	if isAutoInstrumentationInjected(pod) {
+	if isAutoInstrumentationInjected(pod, []string{javaInitContainerName, dotNetInitContainerName, nodeInitContainerName, pythonInitContainerName}) {
 		logger.Info("Skipping pod instrumentation - already instrumented")
 		return pod, nil
 	}
@@ -132,12 +139,24 @@ func (pm *instPodMutator) Mutate(ctx context.Context, ns corev1.Namespace, pod c
 func (pm *instPodMutator) getInstrumentationInstance(ctx context.Context, ns corev1.Namespace, pod corev1.Pod, instAnnotation string) (*v1alpha1.Instrumentation, error) {
 	instValue := annotationValue(ns.ObjectMeta, pod.ObjectMeta, instAnnotation)
 
+	/* ---------------------------- */
+	// Forcing instrumentation for every pod (if there is no instAnnotation available)
+	/* ---------------------------- */
+	if len(instValue) == 0 && instAnnotation != annotationInjectSdk {
+		instValue = "true"
+	}
+
 	if len(instValue) == 0 || strings.EqualFold(instValue, "false") {
 		return nil, nil
 	}
 
 	if strings.EqualFold(instValue, "true") {
-		return pm.selectInstrumentationInstanceFromNamespace(ctx, ns)
+		podName := pod.GetName()
+		if len(podName) == 0 {
+			podName = pod.GetGenerateName()
+		}
+
+		return pm.selectInstrumentationInstanceFromNamespace(ctx, ns, podName)
 	}
 
 	var instNamespacedName types.NamespacedName
@@ -156,7 +175,7 @@ func (pm *instPodMutator) getInstrumentationInstance(ctx context.Context, ns cor
 	return otelInst, nil
 }
 
-func (pm *instPodMutator) selectInstrumentationInstanceFromNamespace(ctx context.Context, ns corev1.Namespace) (*v1alpha1.Instrumentation, error) {
+func (pm *instPodMutator) selectInstrumentationInstanceFromNamespace(ctx context.Context, ns corev1.Namespace, podName string) (*v1alpha1.Instrumentation, error) {
 	var otelInsts v1alpha1.InstrumentationList
 	if err := pm.Client.List(ctx, &otelInsts, client.InNamespace(ns.Name)); err != nil {
 		return nil, err
@@ -164,10 +183,88 @@ func (pm *instPodMutator) selectInstrumentationInstanceFromNamespace(ctx context
 
 	switch s := len(otelInsts.Items); {
 	case s == 0:
-		return nil, errNoInstancesAvailable
+		/* ------------------------ */
+		// Forcing default instrumentation (in case the user did not define instrumentation resource for this namespace)
+		// TODO: find a better place to push it
+		/* ------------------------ */
+		return pm.selectInstrumentationInstanceFromDefault(ctx, ns, podName)
 	case s > 1:
 		return nil, errMultipleInstancesPossible
 	default:
 		return &otelInsts.Items[0], nil
 	}
+}
+
+// TODO: use the opentelemetry Instrumentation resource to manage exclude & include
+func (pm *instPodMutator) selectInstrumentationInstanceFromDefault(ctx context.Context, ns corev1.Namespace, podName string) (*v1alpha1.Instrumentation, error) {
+	cfg := config.GetSprklConfig()
+	// INFO: The algorithm to decide if the pod is entitle to to instrumentation:
+	// 1. IF the NS is on blacklist => no instrumentation
+	// 2. If the NS exclude regex is not empty, and there is a match => no instrumentation
+	// 3. If the POD exclude regex is not empty, and there is a match => no instrumentation
+	// 4. If the NS include regex is not empty, and we donot have match => no instrumentation
+	// 5. If the POD include regex is not empty, and we donot have match => no instrumentation
+	if cfg.BlacklistedNamespaces[ns.GetName()] {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Namespace is blacklisted from auto instrumentation",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"black-list", cfg.BlacklistedNamespaces,
+		)
+		return nil, errNoInstancesAvailable
+	}
+
+	// INFO: @ is not a valid character for names
+	podNameWithNamespace := fmt.Sprintf("%s@%s", podName, ns.GetName())
+	if cfg.SprklPodExclude.Match([]byte(podNameWithNamespace)) {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Pod name is excluded from auto instrumentation by the user",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"sprkl-pod-exclude", cfg.SprklPodExclude.String(),
+		)
+		return nil, errNoInstancesAvailable
+	}
+
+	if cfg.SprklNsExclude.Match([]byte(ns.GetName())) {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Namespace is excluded from auto instrumentation by the user",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"sprkl-ns-exclude", cfg.SprklNsExclude.String(),
+		)
+		return nil, errNoInstancesAvailable
+	}
+
+	if !cfg.SprklNsInclude.Match([]byte(ns.GetName())) {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Namespace is not included for auto instrumentation by the user",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"sprkl-ns-include", cfg.SprklNsInclude.String(),
+		)
+		return nil, errNoInstancesAvailable
+	}
+
+	if !cfg.SprklPodInclude.Match([]byte(podNameWithNamespace)) {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Pod name is not included for auto instrumentation by the user",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"sprkl-pod-include", cfg.SprklPodInclude.String(),
+		)
+		return nil, errNoInstancesAvailable
+	}
+
+	pm.Logger.Info(
+		"[Auto Default Instrumentation] Pod is approved for auto instrumentation",
+		"namespace", ns.GetName(),
+		"pod-name", podName,
+		"podNameWithNameSpace", podNameWithNamespace,
+		"pod.exclue", cfg.SprklPodExclude.String(),
+		"pod.include", cfg.SprklPodInclude.String(),
+		"ns.exclude", cfg.SprklNsExclude.String(),
+		"ns.include", cfg.SprklNsInclude.String(),
+	)
+	return pm.defaultInst, nil
 }
