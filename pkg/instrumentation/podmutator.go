@@ -17,6 +17,7 @@ package instrumentation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -213,22 +214,24 @@ func (pm *instPodMutator) selectInstrumentationInstanceFromDefault(ctx context.C
 		return nil, errNoInstancesAvailable
 	}
 
+	// INFO: @ is not a valid character for names
+	podNameWithNamespace := fmt.Sprintf("%s@%s", podName, ns.GetName())
+	if cfg.SprklPodExclude.Match([]byte(podNameWithNamespace)) {
+		pm.Logger.Info(
+			"[Auto Default Instrumentation] Pod name is excluded from auto instrumentation by the user",
+			"namespace", ns.GetName(),
+			"pod-name", podName,
+			"sprkl-pod-exclude", cfg.SprklPodExclude.String(),
+		)
+		return nil, errNoInstancesAvailable
+	}
+
 	if cfg.SprklNsExclude.Match([]byte(ns.GetName())) {
 		pm.Logger.Info(
 			"[Auto Default Instrumentation] Namespace is excluded from auto instrumentation by the user",
 			"namespace", ns.GetName(),
 			"pod-name", podName,
 			"sprkl-ns-exclude", cfg.SprklNsExclude.String(),
-		)
-		return nil, errNoInstancesAvailable
-	}
-
-	if cfg.SprklPodExclude.Match([]byte(podName)) {
-		pm.Logger.Info(
-			"[Auto Default Instrumentation] Pod name is excluded from auto instrumentation by the user",
-			"namespace", ns.GetName(),
-			"pod-name", podName,
-			"sprkl-pod-exclude", cfg.SprklPodExclude.String(),
 		)
 		return nil, errNoInstancesAvailable
 	}
@@ -243,7 +246,7 @@ func (pm *instPodMutator) selectInstrumentationInstanceFromDefault(ctx context.C
 		return nil, errNoInstancesAvailable
 	}
 
-	if !cfg.SprklPodInclude.Match([]byte(podName)) {
+	if !cfg.SprklPodInclude.Match([]byte(podNameWithNamespace)) {
 		pm.Logger.Info(
 			"[Auto Default Instrumentation] Pod name is not included for auto instrumentation by the user",
 			"namespace", ns.GetName(),
@@ -253,6 +256,15 @@ func (pm *instPodMutator) selectInstrumentationInstanceFromDefault(ctx context.C
 		return nil, errNoInstancesAvailable
 	}
 
-	pm.Logger.Info("[Auto Default Instrumentation] Pod is approved for auto instrumentation", "namespace", ns.GetName(), "pod-name", podName)
+	pm.Logger.Info(
+		"[Auto Default Instrumentation] Pod is approved for auto instrumentation",
+		"namespace", ns.GetName(),
+		"pod-name", podName,
+		"podNameWithNameSpace", podNameWithNamespace,
+		"pod.exclue", cfg.SprklPodExclude.String(),
+		"pod.include", cfg.SprklPodInclude.String(),
+		"ns.exclude", cfg.SprklNsExclude.String(),
+		"ns.include", cfg.SprklNsInclude.String(),
+	)
 	return pm.defaultInst, nil
 }
